@@ -1,0 +1,2 @@
+CLIP_DIMERSION = 512
+

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import torch
 from datasets import load_from_disk
 from PIL import Image
+from tqdm.auto import tqdm
 from transformers import pipeline
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -32,6 +33,7 @@ DEFAULT_DATASET_DIR = os.path.join(
 DEFAULT_OUTPUT = os.path.join(THIS, "annotation_outputs", "llm_annotation_results.json") # 输出文件路径
 NUM_SAMPLES = 1 # 样本处理数量，为了快速测试，我们设为1，日后可以修改
 NUM_WORKERS = 8 # 并行读入数据，越高越快，但不能太高
+BATCH_SIZE = 8 # 推理批大小，CUDA下建议开启批处理
 
 
 def parse_args():
@@ -41,6 +43,7 @@ def parse_args():
     parser.add_argument("--num-samples", type=int, default=NUM_SAMPLES)
     parser.add_argument("--num-workers", type=int, default=NUM_WORKERS)
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--image-size", type=int, default=None)
     parser.add_argument("--output", type=str, default=DEFAULT_OUTPUT)
     return parser.parse_args()
@@ -142,20 +145,39 @@ def extract_text_from_output(output):
     return str(generated)
 
 
-def run_mode(pipe, mode_name: str, prompt: LLMPrompt, preprocessed_samples, max_new_tokens: int):
+def _iter_batches(items, batch_size: int):
+    for i in range(0, len(items), batch_size):
+        yield items[i:i + batch_size]
+
+
+def run_mode(pipe, mode_name: str, prompt: LLMPrompt, preprocessed_samples, max_new_tokens: int, batch_size: int):
     # 主要的推理函数，接受模型管道、模式名称、prompt对象、预处理后的样本列表和生成文本的最大长度，返回一个包含每个样本的index、mode和response的列表，以及推理耗时
     mode_outputs = []
     start = time.time()
-    for sample in preprocessed_samples:
-        messages = format_messages(prompt, sample["image"])
-        output = pipe(text=messages, max_new_tokens=max_new_tokens)
-        mode_outputs.append(
-            {
-                "index": sample["index"],
-                "mode": mode_name,
-                "response": extract_text_from_output(output),
-            }
+    batch_size = max(1, batch_size)
+    total_batches = (len(preprocessed_samples) + batch_size - 1) // batch_size
+
+    for batch_samples in tqdm(
+        _iter_batches(preprocessed_samples, batch_size),
+        total=total_batches,
+        desc=f"{mode_name} inference",
+        unit="batch",
+    ):
+        batch_messages = [format_messages(prompt, sample["image"]) for sample in batch_samples]
+        batch_outputs = pipe(
+            text=batch_messages,
+            max_new_tokens=max_new_tokens,
+            batch_size=batch_size,
         )
+
+        for sample, output in zip(batch_samples, batch_outputs):
+            mode_outputs.append(
+                {
+                    "index": sample["index"],
+                    "mode": mode_name,
+                    "response": extract_text_from_output(output),
+                }
+            )
     elapsed = time.time() - start
     return mode_outputs, elapsed
 
@@ -218,6 +240,7 @@ def main():
         prompt=freedom_prompt,
         preprocessed_samples=preprocessed_samples,
         max_new_tokens=args.max_new_tokens,
+        batch_size=args.batch_size,
     )
     structured_outputs, structured_elapsed = run_mode(
         pipe=pipe,
@@ -225,6 +248,7 @@ def main():
         prompt=structured_prompt,
         preprocessed_samples=preprocessed_samples,
         max_new_tokens=args.max_new_tokens,
+        batch_size=args.batch_size,
     )
     # 合成与保存
     merged = merge_outputs(preprocessed_samples, freedom_outputs, structured_outputs)
@@ -234,6 +258,7 @@ def main():
             "split": args.split,
             "num_samples": args.num_samples,
             "num_workers": args.num_workers,
+            "batch_size": args.batch_size,
             "max_new_tokens": args.max_new_tokens,
             "image_size": args.image_size,
         },

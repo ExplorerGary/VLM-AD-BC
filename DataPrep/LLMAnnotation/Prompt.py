@@ -22,28 +22,64 @@ User message是给LLM的具体任务描述和输入内容，告诉它需要完�
 同时也方便做后续下游任务的处理，比如解析LLM的输出，或者把LLM的输出作为其他模型的输入。
 '''
 
-FREEDOM_SYS = (
+FREEDOM_SYS_LEGACY = (
     "You are an expert in autonomous driving. "
     "This is the front-view image of the ego vehicle. "
     "When explaining the reasoning, please focus on the camera image and the surrounding environment"
 )
 
-FREEDOM_USER = (
+FREEDOM_USER_LEGACY = (
     "1. Please describe the ego vehicle’s current actions.\n"
     "2. Please predict the ego vehicle’s future actions.\n"
     "3. Please explain the reasoning behind both the current and future actions."
 )
 
 
-STRUCTURED_SYS = (
+STRUCTURED_SYS_LEGACY = (
     "You are an expert in autonomous driving. "
     "This is the front-view image of the ego vehicle. "
 )
 
-STRUCTURED_USER = (
+STRUCTURED_USER_LEGACY = (
     "Please describe the ego vehicle’s action from the control action list: {go straight, move slowly, stop, reverse}.\n"
     "Please describe the ego vehicle’s action from the turn action list: {turn left, turn right, turn around, none}.\n"
     "Please describe the ego vehicle’s action from the lane action list: {change lane to the left, change lane to the right, merge into the left lane, merge into the right lane, none}"
+)
+
+
+FREEDOM_SYS = (
+    "You are the ego vehicle's cautious driver-assistant, describing what the car should do from a real driving perspective. "
+    "You must ground every claim in visible evidence from the front-view image. "
+    "Avoid generic safety slogans and avoid repeating the same statement."
+)
+
+FREEDOM_USER = (
+    "Task:\n"
+    "1. Describe the ego vehicle's most likely current action.\n"
+    "2. Predict the ego vehicle's immediate next action (next 2-5 seconds).\n"
+    "3. Provide concise reasoning based on visible cues (lane geometry, lead vehicles, pedestrians, traffic lights/signs, obstacles, road edge).\n\n"
+    "Output rules:\n"
+    "- Keep the answer concise and information-dense.\n"
+    "- No filler text, no disclaimers, no self-reference.\n"
+    "- Use exactly this format:\n"
+    "Current action: <one sentence>\n"
+    "Next action: <one sentence>\n"
+    "Reasoning: <2-4 short bullet points with concrete visual evidence>"
+)
+
+
+STRUCTURED_SYS = (
+    "You are the ego vehicle's control module. "
+    "Your job is to output only machine-readable action flags from the front-view image."
+)
+
+STRUCTURED_USER = (
+    "Choose exactly one flag from each list below.\n"
+    "control_flag: {go straight, move slowly, stop, reverse}\n"
+    "turn_flag: {turn left, turn right, turn around, none}\n"
+    "lane_flag: {change lane to the left, change lane to the right, merge into the left lane, merge into the right lane, none}\n\n"
+    "Return ONLY valid JSON in one line, with no extra text and no markdown:\n"
+    '{"control_flag":"<one option>","turn_flag":"<one option>","lane_flag":"<one option>"}'
 )
 
 class Prompt:

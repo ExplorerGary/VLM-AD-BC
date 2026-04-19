@@ -4,3 +4,5 @@ AUX_Head/CLIP/model_weights/
 DataPrep/LLMAnnotation/annotation_outputs/README.md
 DataPrep/LLMAnnotation/annotation_outputs/llm_annotation_results.json
 AUX_Head/MERGED_RESULT/READMEmd
+front_camera_hf/**/cache-*.arrow
+front_camera_hf/**/tmp*

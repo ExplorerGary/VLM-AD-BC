@@ -1,16 +1,17 @@
 # WEEK01_BASICSETUP 项目说明
 
-本 README 面向当前 WEEK01 阶段的可复现实验链路，重点说明：
+本 README 面向当前 WEEK01 阶段的可复现实验链路，以下是这个Repo的内容：
 
-1. DataPrep 的完整调用流程（先看这个）
+1. DataPrep 的完整调用流程
 2. AUX_Head 中 ONE_HOT 与 CLIP 两条分支的脚本职责、使用模型、输入输出
-3. 最终数据落点在 MERGED_RESULT
+3. 最终要用到的数据落点在 MERGED_RESULT
+4. 我们使用的BC模型和训练链路
 
 > 重要提醒
 >
-> 我在最终整合 AUX 进入流程前，调整过目录结构；且这次已将 `VLM-AD_clone` 的独特训练脚本合并到主目录。
-> 脚本内默认路径可能已经与当前文件所处实际路径不一致。
-> 运行前请优先检查每个脚本的默认参数（例如 `--dataset-dir`、`--input-json`、`--input-dir`、`--output`、`--source-dataset-dir`），并按你的现有目录进行覆盖。
+> 我在最终整合 AUX 进入流程前，调整过目录结构；
+> 因此Repo内数据或者功能的期望路径可能已经与当前文件所处实际路径不一致。
+> 运行前请优先检查每个脚本的默认参数，并按你的现有目录进行覆盖。
 
 ---
 
@@ -20,7 +21,7 @@
 
 - 脚本：`DataPrep/LLMAnnotation/LLMAnnotation.py`
 - 关键参数：
-  - `--dataset-dir`：默认指向 `WARM_UP_TASK/vlm/dataset/front_camera_hf` #是的，仿照VLM-AD的方式，我们只把font camera的原始数据输入进去了
+  - `--dataset-dir`：默认指向 `WARM_UP_TASK/vlm/dataset/front_camera_hf` #是的，Week01 Warmup的时候，我仿照VLM-AD的方式，只把font camera的数据做成了一个HF Dataset
   - `--split`：`train` 或 `validate`
   - `--num-samples`：采样条数
 
@@ -133,7 +134,6 @@
 #### 备注：`eval.py` 的定位
 
 - `AUX_Head/CLIP/scripts/eval.py` 主要提供模型加载与编码函数（`load_model`, `encode_texts`, `encode_images`）
-- `mode=dummy` 可测试；`mode=dataset` 目前未实现
 
 ---
 
@@ -173,11 +173,11 @@
 
 当前训练目标是 [`NetworkNvidiaParallel_VLM_AD`](AutoDriveModels/Dummy/model.py) 这个模型。
 
-它不是纯粹的分类器，也不是纯粹的 VLM；它更接近一个“视觉控制主干 + AUX 监督头”的联合训练结构：
+它是一个“英伟达的BC + 出自VLM-AD 那篇论文的 AUX 监督头”的联合训练结构：
 
-1. 主干输入是前视图图像，输入形状在脚本里被整理成 `[B, 4200]` 或 `[B, 3, 70, 320]`
+1. 主干输入是 font camera 图像，输入形状在脚本里被整理成 `[B, 4200]` 或 `[B, 3, 70, 320]`
 2. 主干输出三维控制回归量：`steering / throttle / brake`
-3. 主干中间会产生 `f_ego`，再通过 projector 得到 `f_ego_proj`
+3. 主干中间会产生 `f_ego`，再通过 projector 升维得到 `f_ego_proj`
 4. `f_ego_proj` 会进入 AUX 头，去对齐两类监督：
 
 	- CLIP 分支的文本 embedding：`clip_current_action`, `clip_next_action`, `clip_reasoning`
@@ -188,7 +188,7 @@
 	- `MSELoss(output, regression_targets)`
 	- `AUX_loss(f_ego_proj, clip_embeddings, action_labels)`
 
-也就是说，这套训练不是只学方向盘回归，而是同时学“驾驶控制 + 语义对齐 + 动作分类监督”。
+
 
 ---
 
@@ -202,19 +202,18 @@
 
 但这三段目前还不是一个完全自动闭环，主要缺口有：
 
-1. 还没有一个统一的总控入口脚本，把“生成 neo dataset -> 校验 schema -> 启动训练”串成一个命令。
-2. `train_vlm_ad.py` 现在还没有真正接上独立验证集，代码里 `val_loader=train_loader` 只是临时占位，不是完整训练闭环。
-3. 训练脚本依赖 merged dataset 的列名和 dtype 已经固定，但还没有在启动时做完整 schema 检查；一旦中间产物字段名变动，训练端会直接失配。
-4. 训练前虽然有 `check_dimensions.py` 这类思路，但它还没有被纳入训练启动流程，所以“数据维度是否对齐”还需要人工先确认。
-5. 目前的数据合并是按 metadata 回填完成的，但训练侧还需要确认源数据里的行为回归字段 `steering / throttle / brake` 在最终 merged dataset 中始终可用，否则主损失那一支就无法训练。
+1. `train_vlm_ad.py` 还没有做基本的冒烟测试，因此可能有bug
+2. 由于项目文件结构调整，Repo内数据或者功能的期望路径可能已经与当前文件所处实际路径不一致。因此数据或者脚本的加载可能有问题
+3. 还没有一个统一的总控入口脚本，把“生成 neo dataset -> 校验 schema -> 启动训练”串成一个命令。
+4. `train_vlm_ad.py` 现在还没有真正接上独立验证集，代码里 `val_loader=train_loader` 只是临时占位，不是完整训练闭环。
+
 
 结论很直接：
 
 - 模型本身已经选定为 `NetworkNvidiaParallel_VLM_AD`
 - 数据从 LLM 标注到 merged dataset 已经打通
-- 但训练闭环还缺“统一总入口、真实验证集、启动前 schema 检查”这三块
+- 但训练闭环还缺“最基本的冒烟测试”
 
-这些是当前 pipeline 的缺口，不是模型结构本身的问题。
 
 ---
 
@@ -223,7 +222,7 @@
 ```text
 WEEK01_BASICSETUP/
 ├─ README.md
-├─ VLM-AD.pdf
+├─ VLM-AD.pdf (复现的论文)
 ├─ DataPrep/
 │  └─ LLMAnnotation/
 │     ├─ LLMAnnotation.py
@@ -245,15 +244,19 @@ WEEK01_BASICSETUP/
 │  │  └─ output/
 │  │     └─ freedom_annotations_for_clip.json
 │  └─ MERGED_RESULT/
-│     ├─ script/
-│     │  └─ make_neo_dataset.py
-│     └─ output_dataset/
-│        └─ neo_hf_dataset/
+│  │  ├─ script/
+│  │  │  └─ make_neo_dataset.py
+│  │  └─ output_dataset/
+│  │     └─ neo_hf_dataset/
+│  └─ AutoDriveModels/
+│     ├─ Dummy/
+│     │  └─ model.py (改进的BC模型)
 └─ TRAINING_SCRIPT/
 	└─ dummy_related/
 		├─ train_vlm_ad.py
 		├─ dataset_vlm_ad.py
 		└─ train_demo.py
+  
 ```
 
 ---
@@ -270,29 +273,5 @@ WEEK01_BASICSETUP/
 	- 最终产出：`output_dataset/neo_hf_dataset`
 5. 训练阶段（AUX 接入）
 	- 使用：`TRAINING_SCRIPT/dummy_related/train_vlm_ad.py`
-	- 维度检查：`TRAINING_SCRIPT/dummy_related/check_dimensions.py`
 
 ---
-
-## 8) 路径调整检查清单（必须检查!!!）
-
-每次运行前至少核对以下参数：
-
-1. `DataPrep/LLMAnnotation/LLMAnnotation.py`
-	- `--dataset-dir`
-	- `--output`
-2. `AUX_Head/ONE_HOT/script/result_parser.py`
-	- `--input-json`
-	- `--input-dir`
-	- `--output`
-3. `AUX_Head/CLIP/scripts/result_parser.py`
-	- `--input-json`
-	- `--input-dir`
-	- `--model-path`
-	- `--output`
-4. `AUX_Head/MERGED_RESULT/script/make_neo_dataset.py`
-	- `--source-dataset-dir`
-	- `--source-split`
-	- `--freedom-json`
-	- `--structured-json`
-	- `--output-dir`
